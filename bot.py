@@ -1,21 +1,27 @@
 from http.client import responses
-
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, ContextTypes, CommandHandler, MessageHandler
+import asyncio
+from telegram import Update, CallbackQuery
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, ContextTypes, CommandHandler, MessageHandler, filters
 
 from gpt import ChatGptService
-from util import (load_message, send_text, send_image, show_main_menu,
-                  default_callback_handler, load_prompt, send_text_buttons)
-
+from util import (load_message, send_image, show_main_menu,
+                  default_callback_handler, load_prompt, send_text_buttons, send_text)
 
 import credentials
-
+user_events = {}
+quiz_score = {}
 chat_modes = {}
+talk_characters = {
+                                'talk_cobain': '1.',
+                                'talk_hawking': '2.',
+                                'talk_nietzsche': '3.',
+                                'talk_queen' : '4.',
+                                'talk_tolkien' : '5.'
+                            }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = load_message('main')
     await send_image(update, context, 'main')
-    await send_text(update, context, text)
+    await send_text(update, context, load_message('main'))
     await show_main_menu(update, context, {
         'start': 'Головне меню',
         'random': 'Дізнатися випадковий цікавий факт 🧠',
@@ -30,8 +36,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def random(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_image(update, context, 'random')
-    prompt = load_prompt('random')
-    response = await chat_gpt.send_question(prompt, 'Давай рандомний факт')
+    prompt_random = load_prompt('random')
+    response = await chat_gpt.send_question(prompt_random, 'Давай рандомний факт')
     await send_text_buttons(
         update, context,
         response,
@@ -51,14 +57,53 @@ async def plain_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if mode is None:
         await send_text(update, context, 'Я не розумію такої команди. Відправ команду /start для допомоги')
     elif mode == 'GPT_MODE':
-        prompt = load_prompt('gpt')
-        response = await chat_gpt.send_question(prompt, update.message.text)
+        prompt_gpt = load_prompt('gpt')
+        response = await chat_gpt.send_question(prompt_gpt, update.message.text)
         await send_text_buttons(update, context, response,
                             {
-                                'gpt_finish': 'Закінчити',
-                                'gpt_one_more' : 'Маю ще питання'
-                            }
-                    )
+                                'gpt_finish': 'Закінчити'
+                            })
+
+async def talk_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    chat_modes[user_id] = 'TALK_MODE'
+    await send_image(update, context, 'talk')
+    text = load_message('talk')
+    await send_text_buttons(update, context, text, talk_characters)
+
+async def talking_process(update: Update, context: ContextTypes.DEFAULT_TYPE, person : str):
+    query = update.callback_query
+    prompt_talk = load_prompt(person)
+    chat_modes[query.from_user.id] = f'talking_with_{person}'
+    response = await chat_gpt.send_question(prompt_talk, update.callback_query.data)
+    await send_text_buttons(update, context, response, {'talk_finish': 'Закінчити розмову'})
+
+
+async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = update.message.from_user.id
+    mode = chat_modes.get(user_id)
+    click_data = query.data
+    if mode is None:
+        await send_text(update, context, 'Я не розумію такої команди. Відправ команду /start для допомоги')
+        return
+    elif mode == 'TALK_MODE':
+        if click_data in talk_characters:
+            await talking_process(update, context, click_data)
+
+
+
+# async def quiz_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     await send_image(update, context, 'quiz')
+#     await send_text_buttons(update, context, load_message('quiz'), {
+#                                                                     'quiz_prog': 'Програмування на python',
+#                                                                     'quiz_math': 'Математика',
+#                                                                     'quiz_biology' : 'Біологія'
+#                                                                     })
+# async def
+
+
 
 
 async def random_buttons_handler(update: Update, context):
@@ -75,6 +120,12 @@ async def gpt_buttons_handler(update: Update, context):
         await start(update, context)
         chat_modes[update.message.from_user.id] = None
 
+async def talk_buttons_handler(update: Update, context):
+    query = update.callback_query.data
+    if query == 'talk_finish':
+        await start(update, context)
+        chat_modes[update.message.from_user.id] = None
+
 chat_gpt = ChatGptService(credentials.ChatGPT_TOKEN)
 app = ApplicationBuilder().token(credentials.BOT_TOKEN).build()
 
@@ -82,11 +133,14 @@ app = ApplicationBuilder().token(credentials.BOT_TOKEN).build()
 app.add_handler(CommandHandler('start', start))
 app.add_handler(CommandHandler('random', random))
 app.add_handler(CommandHandler('gpt', gpt))
-app.add_handler(MessageHandler(None, plain_text_handler))
+app.add_handler(CommandHandler('talk', talk_start))
+# app.add_handler(CommandHandler('quiz', quiz_start))
+app.add_handler(MessageHandler(filters.TEXT & filters.COMMAND, plain_text_handler))
 
 # Зареєструвати обробник колбеку можна так:
 app.add_handler(CallbackQueryHandler(random_buttons_handler, pattern='^random_.*'))
 app.add_handler(CallbackQueryHandler(gpt_buttons_handler, pattern='^gpt_.*'))
+app.add_handler(CallbackQueryHandler(talk_buttons_handler, pattern='^talk_.*'))
 
 # app.add_handler(CallbackQueryHandler(default_callback_handler))
 app.run_polling()
