@@ -9,7 +9,6 @@ from util import (load_message, send_image, show_main_menu,
 
 import credentials
 user_events = {}
-quiz_score = {}
 chat_modes = {}
 talk_characters = {
                                 'talk_cobain': '1.',
@@ -63,6 +62,10 @@ async def plain_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                             {
                                 'gpt_finish': 'Закінчити'
                             })
+    query = update.callback_query.data
+    if query == 'gpt_finish':
+        await start(update, context)
+        chat_modes[update.message.from_user.id] = None
 
 async def talk_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -79,10 +82,10 @@ async def talking_process(update: Update, context: ContextTypes.DEFAULT_TYPE, pe
     await send_text_buttons(update, context, response, {'talk_finish': 'Закінчити розмову'})
 
 
-async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def choosing_characters(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user_id = update.message.from_user.id
+    user_id = query.from_user.id
     mode = chat_modes.get(user_id)
     click_data = query.data
     if mode is None:
@@ -91,18 +94,47 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif mode == 'TALK_MODE':
         if click_data in talk_characters:
             await talking_process(update, context, click_data)
+    if query == 'talk_finish':
+        await start(update, context)
+        chat_modes[update.message.from_user.id] = None
 
 
-
-# async def quiz_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     await send_image(update, context, 'quiz')
-#     await send_text_buttons(update, context, load_message('quiz'), {
-#                                                                     'quiz_prog': 'Програмування на python',
-#                                                                     'quiz_math': 'Математика',
-#                                                                     'quiz_biology' : 'Біологія'
-#                                                                     })
-# async def
-
+async def quiz_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    chat_modes[user_id] = 'QUIZ_MODE'
+    await send_image(update, context, 'quiz')
+    await send_text_buttons(update, context, load_message('quiz'), {
+                                                                    'quiz_prog': 'Програмування на python',
+                                                                    'quiz_math': 'Математика',
+                                                                    'quiz_biology' : 'Біологія',
+                                                                    'quiz_finish': 'Закінчити'
+                                                                    })
+async def quiz_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    prompt_quiz = load_prompt('quiz')
+    query = update.callback_query
+    quiz_score = 0
+    await chat_gpt.send_question(prompt_quiz, query.data)
+    answer = await chat_gpt.add_message(update.message.text)
+    if answer == "Правильно!":
+        quiz_score += 1
+        await send_text(update, context, answer)
+        await send_text_buttons(update, context, f'Кількість правильних відповідей{quiz_score}', {
+                                                                    'quiz_prog': 'Програмування на python',
+                                                                    'quiz_math': 'Математика',
+                                                                    'quiz_biology' : 'Біологія',
+                                                                    'quiz_more' : 'Попередня тема',
+                                                                    'quiz_finish' : 'Закінчити'})
+    else:
+        await send_text(update, context, answer)
+        await send_text_buttons(update, context, f'Кількість правильних відповідей{quiz_score}', {
+            'quiz_prog': 'Програмування на python',
+            'quiz_math': 'Математика',
+            'quiz_biology': 'Біологія',
+            'quiz_more': 'Попередня тема',
+            'quiz_finish': 'Закінчити'})
+    if query == 'quiz_finish':
+        await start(update, context)
+        chat_modes[update.message.from_user.id] = None
 
 
 
@@ -114,17 +146,9 @@ async def random_buttons_handler(update: Update, context):
         await random(update, context)
     await update.callback_query.answer()
 
-async def gpt_buttons_handler(update: Update, context):
-    query = update.callback_query.data
-    if query == 'gpt_finish':
-        await start(update, context)
-        chat_modes[update.message.from_user.id] = None
 
-async def talk_buttons_handler(update: Update, context):
-    query = update.callback_query.data
-    if query == 'talk_finish':
-        await start(update, context)
-        chat_modes[update.message.from_user.id] = None
+
+
 
 chat_gpt = ChatGptService(credentials.ChatGPT_TOKEN)
 app = ApplicationBuilder().token(credentials.BOT_TOKEN).build()
@@ -134,13 +158,14 @@ app.add_handler(CommandHandler('start', start))
 app.add_handler(CommandHandler('random', random))
 app.add_handler(CommandHandler('gpt', gpt))
 app.add_handler(CommandHandler('talk', talk_start))
-# app.add_handler(CommandHandler('quiz', quiz_start))
+app.add_handler(CommandHandler('quiz', quiz_start))
 app.add_handler(MessageHandler(filters.TEXT & filters.COMMAND, plain_text_handler))
 
 # Зареєструвати обробник колбеку можна так:
 app.add_handler(CallbackQueryHandler(random_buttons_handler, pattern='^random_.*'))
-app.add_handler(CallbackQueryHandler(gpt_buttons_handler, pattern='^gpt_.*'))
-app.add_handler(CallbackQueryHandler(talk_buttons_handler, pattern='^talk_.*'))
+app.add_handler(CallbackQueryHandler(plain_text_handler, pattern='^gpt_.*'))
+app.add_handler(CallbackQueryHandler(choosing_characters, pattern='^talk_.*'))
+app.add_handler(CallbackQueryHandler(quiz_process, pattern='^quiz_.*'))
 
 # app.add_handler(CallbackQueryHandler(default_callback_handler))
 app.run_polling()
