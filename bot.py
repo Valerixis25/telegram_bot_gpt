@@ -26,7 +26,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'random': 'Дізнатися випадковий цікавий факт 🧠',
         'gpt': 'Задати питання чату GPT 🤖',
         'talk': 'Поговорити з відомою особистістю 👤',
-        'quiz': 'Взяти участь у квізі ❓'
+        'quiz': 'Взяти участь у квізі ❓',
+        'translate' : 'Перекласти текст'
         # Додати команду в меню можна так:
         # 'command': 'button text'
 
@@ -41,10 +42,17 @@ async def random(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update, context,
         response,
         {
-            'random_finish' : 'Закінчити',
+            'finish' : 'Закінчити',
             'random_one_more' :'Хочу ще факт',
-        }
-    )
+            }
+        )
+    await update.callback_query.answer()
+
+async def random_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query.data
+    if query == 'random_one_more':
+        await random(update, context)
+
 
 async def gpt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_modes[update.message.from_user.id] = 'GPT_MODE'
@@ -60,12 +68,8 @@ async def plain_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         response = await chat_gpt.send_question(prompt_gpt, update.message.text)
         await send_text_buttons(update, context, response,
                             {
-                                'gpt_finish': 'Закінчити'
+                                'finish': 'Закінчити'
                             })
-    query = update.callback_query.data
-    if query == 'gpt_finish':
-        await start(update, context)
-        chat_modes[update.message.from_user.id] = None
 
 async def talk_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -73,13 +77,16 @@ async def talk_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_image(update, context, 'talk')
     text = load_message('talk')
     await send_text_buttons(update, context, text, talk_characters)
+    await update.callback_query.answer()
 
 async def talking_process(update: Update, context: ContextTypes.DEFAULT_TYPE, person : str):
     query = update.callback_query
     prompt_talk = load_prompt(person)
     chat_modes[query.from_user.id] = f'talking_with_{person}'
     response = await chat_gpt.send_question(prompt_talk, update.callback_query.data)
-    await send_text_buttons(update, context, response, {'talk_finish': 'Закінчити розмову'})
+    await send_image(update, context, person)
+    await send_text_buttons(update, context, response, {'finish': 'Закінчити розмову'})
+    await update.callback_query.answer()
 
 
 async def choosing_characters(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -107,8 +114,10 @@ async def quiz_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                                                     'quiz_prog': 'Програмування на python',
                                                                     'quiz_math': 'Математика',
                                                                     'quiz_biology' : 'Біологія',
-                                                                    'quiz_finish': 'Закінчити'
+                                                                    'finish': 'Закінчити'
                                                                     })
+    await update.callback_query.answer()
+
 async def quiz_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt_quiz = load_prompt('quiz')
     query = update.callback_query
@@ -123,7 +132,7 @@ async def quiz_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                                                     'quiz_math': 'Математика',
                                                                     'quiz_biology' : 'Біологія',
                                                                     'quiz_more' : 'Попередня тема',
-                                                                    'quiz_finish' : 'Закінчити'})
+                                                                    'finish' : 'Закінчити'})
     else:
         await send_text(update, context, answer)
         await send_text_buttons(update, context, f'Кількість правильних відповідей{quiz_score}', {
@@ -131,20 +140,42 @@ async def quiz_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'quiz_math': 'Математика',
             'quiz_biology': 'Біологія',
             'quiz_more': 'Попередня тема',
-            'quiz_finish': 'Закінчити'})
-    if query == 'quiz_finish':
+            'finish': 'Закінчити'})
+    await update.callback_query.answer()
+
+async def translate_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_modes[update.message.from_user.id] = 'TRANSLATION_MODE'
+    await send_image(update, context, 'translate')
+    await send_text_buttons(update, context, load_message('translate1'), {'translate_ukrainian': 'Українська',
+                                                                                'translate_english': 'Англійська',
+                                                                                'translate_german': 'Німецька',
+                                                                                'translate_russian': 'Російська',
+                                                                                'finish':'Закінчити'} )
+    await update.callback_query.answer()
+
+
+async def translate_process(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query.answer()
+    prompt_translate = load_prompt('translate')
+    await chat_gpt.send_question(prompt_translate, str(query))
+
+
+
+    await send_text(update, context, 'translate2')
+    response = await chat_gpt.add_message(update.message.text)
+    await send_text_buttons(update, context, response, {'finish' : 'Закінчити'})
+
+
+
+
+
+
+async def finish_buttons_handler(update: Update, context : ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query.data
+    if query == 'finish':
         await start(update, context)
         chat_modes[update.message.from_user.id] = None
 
-
-
-async def random_buttons_handler(update: Update, context):
-    query = update.callback_query.data
-    if query == 'random_finish':
-        await start(update, context)
-    elif query == 'random_one_more':
-        await random(update, context)
-    await update.callback_query.answer()
 
 
 
@@ -159,13 +190,15 @@ app.add_handler(CommandHandler('random', random))
 app.add_handler(CommandHandler('gpt', gpt))
 app.add_handler(CommandHandler('talk', talk_start))
 app.add_handler(CommandHandler('quiz', quiz_start))
+app.add_handler(CommandHandler('translate', translate_start))
 app.add_handler(MessageHandler(filters.TEXT & filters.COMMAND, plain_text_handler))
 
 # Зареєструвати обробник колбеку можна так:
-app.add_handler(CallbackQueryHandler(random_buttons_handler, pattern='^random_.*'))
+app.add_handler(CallbackQueryHandler(finish_buttons_handler, pattern='^finish.*'))
 app.add_handler(CallbackQueryHandler(plain_text_handler, pattern='^gpt_.*'))
 app.add_handler(CallbackQueryHandler(choosing_characters, pattern='^talk_.*'))
 app.add_handler(CallbackQueryHandler(quiz_process, pattern='^quiz_.*'))
+app.add_handler(CallbackQueryHandler(translate_process, pattern='^translate_.*'))
 
 # app.add_handler(CallbackQueryHandler(default_callback_handler))
 app.run_polling()
